@@ -1,0 +1,43 @@
+seed: 19961103
+random_tp_range: 1000
+
+fast_reset: True
+start_time: 0
+time_limit: 2000
+candidate_preferred_spawn_biome:
+  - forest
+candidate_weather:
+  - clear
+
+camera_config:
+  camera_binsize: 1
+  camera_maxval: 10
+  camera_mu: 20
+  camera_quantization_scheme: "mu_law"
+
+origin_resolution: [640, 360]
+resize_resolution: [640, 360]
+
+need_crafting_table: False
+need_gui: False
+inventory_distraction_level: "zero"
+
+task_conf:
+  - name: "mine"
+    text: "mine_block:oak_log (chop 5 logs)"
+
+reward_conf:
+  - event: "mine_block"
+    max_reward_times: 5
+    reward: 1.0
+    objects:
+      - "oak_log"
+    identity: "chop 5 oak logs"
+
+# No tools given — agent must chop with bare hands (slower, requires perseverance)
+init_inventory: []
+
+mobs: []
+
+worker:
+  "mine"
