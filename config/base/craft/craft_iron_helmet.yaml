@@ -1,0 +1,27 @@
+defaults:
+  - base
+  - _self_
+
+candidate_preferred_spawn_biome:
+  - plains
+
+task_conf:
+  - name: "craft"
+    text: "craft_item:iron_helmet"
+
+reward_conf:
+  - event: "craft_item"
+    max_reward_times: 1
+    reward: 1.0
+    objects:
+      - "iron_helmet"
+    identity: "craft iron_helmet"
+
+need_crafting_table: True
+need_gui: True
+
+init_inventory:
+  - slot: 0
+    type: iron_ingot
+    quantity: 5
+

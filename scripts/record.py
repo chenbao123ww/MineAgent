@@ -29,7 +29,6 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import cv2
 import hydra
 import numpy as np
 from rich import print
@@ -185,11 +184,28 @@ class RecordingAgent(agent_wrapper.VLLM_AGENT):
 
 class TrajectoryRecorder:
 
-    def __init__(self, output_dir: str):
+    def __init__(self, output_dir: str, fps: int = 20):
         self.output_dir = Path(output_dir)
-        self.frames_dir = self.output_dir / "frames"
-        self.frames_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.fps = fps
         self.steps: List[dict] = []
+        self._writer = None
+        self._video_path: Optional[str] = None
+
+    def _init_writer(self, pov: np.ndarray) -> None:
+        import imageio_ffmpeg
+        h, w = pov.shape[:2]
+        self._video_path = str(self.output_dir / "video.mp4")
+        self._writer = imageio_ffmpeg.write_frames(
+            self._video_path, (w, h),
+            fps=self.fps,
+            codec="libx264",
+            pix_fmt_in="rgb24",
+            pix_fmt_out="yuv420p",
+            macro_block_size=2,
+            output_params=["-crf", "18"],
+        )
+        self._writer.send(None)
 
     def record(
         self,
@@ -203,15 +219,11 @@ class TrajectoryRecorder:
         reward: float,
         info: dict,
     ) -> None:
-        frame_name = f"{step:05d}.png"
-        cv2.imwrite(
-            str(self.frames_dir / frame_name),
-            cv2.cvtColor(pov.astype(np.uint8), cv2.COLOR_RGB2BGR),
-        )
+        if self._writer is None:
+            self._init_writer(pov)
+        self._writer.send(pov.astype(np.uint8).tobytes())
         self.steps.append({
             "step": step,
-            "timestamp": time.time(),
-            "frame": frame_name,
             "instruction": instruction,
             # model outputs
             "model_raw_output": raw_output,
@@ -231,18 +243,11 @@ class TrajectoryRecorder:
         return str(path)
 
     def save_video(self, fps: int = 20) -> Optional[str]:
-        frame_files = sorted(self.frames_dir.glob("*.png"))
-        if not frame_files:
+        if self._writer is None:
             return None
-        sample = cv2.imread(str(frame_files[0]))
-        h, w = sample.shape[:2]
-        path = self.output_dir / "video.mp4"
-        writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
-        for fp in frame_files:
-            writer.write(cv2.imread(str(fp)))
-        writer.release()
-        print(f"[green]video.mp4       → {path}[/green]")
-        return str(path)
+        self._writer.close()
+        print(f"[green]video.mp4       → {self._video_path}[/green]")
+        return self._video_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -253,18 +258,14 @@ def record(args):
     # ── Load Hydra config ─────────────────────────────────────────────────────
     hydra.core.global_hydra.GlobalHydra.instance().clear()
     cfg_path = Path(f"{args.env_config}.yaml")
-    abs_dir = str(Path(args.config_base) / cfg_path.parent)
-    if os.path.isabs(abs_dir):
-        hydra.initialize_config_dir(config_dir=abs_dir, version_base="1.3")
-    else:
-        hydra.initialize(config_path=abs_dir, version_base="1.3")
+    abs_dir = str(Path(args.config_base).resolve() / cfg_path.parent)
+    hydra.initialize_config_dir(config_dir=abs_dir, version_base="1.3")
     cfg = hydra.compose(config_name=cfg_path.stem)
 
     # ── Output directory ──────────────────────────────────────────────────────
-    model_tag = Path(args.checkpoints).name
-    task_tag  = args.env_config.replace("/", "_")
-    run_tag   = f"{model_tag}-{task_tag}-{time.strftime('%Y%m%d_%H%M%S')}"
-    recorder  = TrajectoryRecorder(str(Path(args.output_dir) / run_tag))
+    task_tag  = Path(args.env_config).name
+    run_tag   = f"{task_tag}-{time.strftime('%Y%m%d_%H%M%S')}"
+    recorder  = TrajectoryRecorder(str(Path(args.output_dir) / run_tag), fps=args.fps)
     print(f"[cyan]Output dir: {recorder.output_dir}[/cyan]")
 
     # ── Build environment ─────────────────────────────────────────────────────
@@ -337,7 +338,7 @@ def record(args):
     )
     instructions = [item["text"] for item in cfg.task_conf]
     instruction_str = instructions[0]
-    print(f"[cyan]Task: {instruction_str} | max_frames={args.max_frames}[/cyan]")
+    # print(f"[cyan]Task: {instruction_str} | max_frames={args.max_frames}[/cyan]")
 
     # ── Step loop ─────────────────────────────────────────────────────────────
     success = False
@@ -388,13 +389,10 @@ def record(args):
 
     # ── Persist ───────────────────────────────────────────────────────────────
     meta = {
-        "task":            args.env_config,
-        "model":           args.checkpoints,
-        "success":         success,
-        "total_steps":     len(recorder.steps),
-        "total_reward":    total_reward,
-        "instruction":     instruction_str,
-        "record_args":     vars(args),
+        "run":          run_tag,
+        "success":      success,
+        "total_steps":  len(recorder.steps),
+        "total_reward": total_reward,
     }
     recorder.save_json(meta)
     recorder.save_video(fps=args.fps)
@@ -410,7 +408,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MineAgent trajectory recorder")
 
     # task / model
-    parser.add_argument("--env-config", "-e",   type=str, default="kill/kill_zombie")
+    parser.add_argument("--env-config", "-e",   type=str, default="base/kill/kill_zombie")
     parser.add_argument("--checkpoints",         type=str,
                         default="/root/autodl-tmp/MineAgent/models/jarvis_vla_qwen2_vl_7b_sft")
     parser.add_argument("--base-url",            type=str, default="http://localhost:8000/v1")
@@ -420,7 +418,7 @@ if __name__ == "__main__":
     # recording
     parser.add_argument("--output-dir",          type=str,
                         default="/root/autodl-tmp/MineAgent/trajectories")
-    parser.add_argument("--max-frames",          type=int,   default=300)
+    parser.add_argument("--max-frames",          type=int,   default=1000)
     parser.add_argument("--extra-steps",         type=int,   default=20,
                         help="Steps to record after task success")
     parser.add_argument("--fps",                 type=int,   default=20)

@@ -1,0 +1,56 @@
+seed: 19961103
+random_tp_range: 1000
+
+fast_reset: True
+start_time: 0
+time_limit: 3500
+candidate_preferred_spawn_biome:
+  - mountains
+candidate_weather:
+  - clear
+
+camera_config:
+  camera_binsize: 1
+  camera_maxval: 10
+  camera_mu: 20
+  camera_quantization_scheme: "mu_law"
+
+origin_resolution: [640, 360]
+resize_resolution: [640, 360]
+
+need_crafting_table: False
+need_gui: False
+inventory_distraction_level: "low"
+
+task_conf:
+  - name: "mine"
+    text: "mine_block:iron_ore and mine_block:coal_ore"
+
+reward_conf:
+  - event: "mine_block"
+    max_reward_times: 2
+    reward: 0.5
+    objects:
+      - "iron_ore"
+      - "deepslate_iron_ore"
+    identity: "mine 2 iron ore"
+  - event: "mine_block"
+    max_reward_times: 2
+    reward: 0.5
+    objects:
+      - "coal_ore"
+      - "deepslate_coal_ore"
+    identity: "mine 2 coal ore" 
+
+init_inventory:
+  - slot: 0
+    type: stone_pickaxe
+    quantity: 1
+  - slot: 1
+    type: torch
+    quantity: 16
+
+mobs: []
+
+worker:
+  "mine"

@@ -1,0 +1,21 @@
+defaults:
+  - base
+  - _self_
+
+candidate_preferred_spawn_biome:
+  - "taiga"
+
+task_conf:
+  - name: "mine"
+    text: "mine_block:spruce_log"
+
+reward_conf:
+  - event: "mine_block"
+    max_reward_times: 1
+    reward: 1.0
+    objects:
+      - "spruce_log"
+    identity: "mine spruce_log"
+
+init_inventory:
+  []

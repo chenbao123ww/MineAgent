@@ -1,0 +1,66 @@
+seed: 3001859308298079279
+random_tp_range: 1000
+
+fast_reset: True
+start_time: 0
+time_limit: 3000
+candidate_preferred_spawn_biome:
+  - plains
+preferred_spawn_biome: "plains"
+candidate_weather:
+  - clear
+
+command:
+  - "/time set night"
+
+camera_config:
+  camera_binsize: 1
+  camera_maxval: 10
+  camera_mu: 20
+  camera_quantization_scheme: "mu_law"
+
+origin_resolution: [640, 360]
+resize_resolution: [640, 360]
+
+need_crafting_table: False
+need_gui: False
+inventory_distraction_level: "zero"
+
+task_conf:
+  - name: "kill_entity"
+    text: "kill_entity:pillager and kill_entity:vindicator"
+
+reward_conf:
+  - event: "kill_entity"
+    max_reward_times: 2
+    reward: 0.5
+    objects:
+      - "pillager"
+    identity: "kill 2 pillagers"
+  - event: "kill_entity"
+    max_reward_times: 1
+    reward: 0.5
+    objects:
+      - "vindicator"
+    identity: "kill vindicator" 
+
+mobs:
+  - name: "pillager"
+    number: 3
+    range_x: [-6,-2]
+    range_z: [3,12]
+  - name: "vindicator"
+    number: 1
+    range_x: [2, 6]
+    range_z: [3,8]
+
+init_inventory:
+  - slot: 0
+    type: "iron_sword"
+    quantity: 1
+  - slot: 1
+    type: "shield"
+    quantity: 1
+
+worker:
+  "mine"

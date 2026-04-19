@@ -1,0 +1,53 @@
+seed: 19961103
+random_tp_range: 1000
+
+fast_reset: True
+start_time: 0
+time_limit: 3000
+candidate_preferred_spawn_biome:
+  - plains
+candidate_weather:
+  - clear
+
+camera_config:
+  camera_binsize: 1
+  camera_maxval: 10
+  camera_mu: 20
+  camera_quantization_scheme: "mu_law"
+
+origin_resolution: [640, 360]
+resize_resolution: [640, 360]
+
+need_crafting_table: False
+need_gui: True
+inventory_distraction_level: "low"
+
+task_conf:
+  - name: "smelt"
+    text: "craft_item:gold_ingot (smelt 5)"
+
+reward_conf:
+  - event: "craft_item"
+    max_reward_times: 5
+    reward: 1.0
+    objects:
+      - "gold_ingot"
+    identity: "smelt 5 gold_ingot"
+
+init_inventory:
+  - slot: 0
+    type: furnace
+    quantity: 1
+  - slot: 20
+    type: coal
+    quantity: 16
+  - slot: 14
+    type: raw_gold
+    quantity: 16
+
+need_furnace: True
+
+mobs: []
+
+worker:
+  "smelt"

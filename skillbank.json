@@ -1,0 +1,18 @@
+[
+  {
+    "skill_id": "melee_combat_hostile",
+    "skill_name": "Melee Combat Against Hostiles",
+    "description": "Locate, approach, and eliminate a hostile mob using a melee weapon.",
+    "preconditions": "Equip a melee weapon. Identify a target mob in the immediate area.",
+    "sub_tasks": [
+      "Rotate the camera to center the target and move forward to close the distance.",
+      "Maintain the crosshair on the target while staying within striking range.",
+      "Press attack repeatedly until the target is defeated, adjusting for knockback."
+    ],
+    "key_action_patterns": [
+      "attack (repeatedly when crosshair is on target)",
+      "forward + turn_left/right (to track and approach)",
+      "look_up/down (to adjust for target height)"
+    ]
+  }
+]

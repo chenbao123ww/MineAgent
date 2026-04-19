@@ -1,0 +1,53 @@
+seed: 3001859308298079279
+random_tp_range: 1000
+
+fast_reset: True
+start_time: 0
+time_limit: 2000
+candidate_preferred_spawn_biome:
+  - plains
+preferred_spawn_biome: "plains"
+candidate_weather:
+  - clear
+
+command:
+  - "/time set night"
+
+camera_config:
+  camera_binsize: 1
+  camera_maxval: 10
+  camera_mu: 20
+  camera_quantization_scheme: "mu_law"
+
+origin_resolution: [640, 360]
+resize_resolution: [640, 360]
+
+need_crafting_table: False
+need_gui: False
+inventory_distraction_level: "zero"
+
+task_conf:
+  - name: "kill_entity"
+    text: "kill_entity:skeleton (kill 3)"
+
+reward_conf:
+  - event: "kill_entity"
+    max_reward_times: 3
+    reward: 1.0
+    objects:
+      - "skeleton"
+    identity: "kill 3 skeleton" 
+
+mobs:
+  - name: "skeleton"
+    number: 5
+    range_x: [-5, 5]
+    range_z: [3,15]
+
+init_inventory:
+  - slot: 0
+    type: "iron_sword"
+    quantity: 1
+
+worker:
+  "mine"
