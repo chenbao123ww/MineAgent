@@ -1,1 +1,1 @@
-Build on MineStudio.
+MineAgent is a Minecraft AI agent training and evaluation framework built on the **JarvisVLA** vision-language-action model (Qwen2-VL 7B base). It records agent trajectories in a Minecraft simulator, extracts reusable skills from those trajectories via LLM analysis, and generates skill-annotated VQA training data for fine-tuning.

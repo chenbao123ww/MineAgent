@@ -17,7 +17,7 @@ reward_conf:
       - "oak_planks"
     identity: "craft oak_planks"
 
-need_crafting_table: True
+need_crafting_table: False
 need_gui: True
 
 init_inventory:

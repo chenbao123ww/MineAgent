@@ -137,6 +137,17 @@ def evaluate(video_path,checkpoints,environment_config:dict,model_config:dict,de
     env.close()
     return success
 
+def _get_video_fold(checkpoints, env_config, video_main_fold):
+    model_ref_name = checkpoints.split('/')[-1]
+    if "checkpoint" in model_ref_name:
+        checkpoint_num = model_ref_name.split("-")[-1]
+        model_base_name = checkpoints.split('/')[-2]
+        model_ref_name = f"{model_base_name}-{checkpoint_num}"
+    video_fold = os.path.join(video_main_fold, f"{model_ref_name}-{env_config.split('/')[-1]}")
+    Path(video_fold).mkdir(parents=True, exist_ok=True)
+    return video_fold
+
+
 @ray.remote
 def evaluate_wrapper(video_path,checkpoints,environment_config,base_url,model_config):
 
@@ -146,19 +157,9 @@ def evaluate_wrapper(video_path,checkpoints,environment_config,base_url,model_co
 
 def multi_evaluate(args):
     ray.init()
-    import os
-    from pathlib import Path
-    
-    model_ref_name = args.checkpoints.split('/')[-1]
-    if "checkpoint" in model_ref_name:
-        checkpoint_num = model_ref_name.split("-")[-1]
-        model_base_name = args.checkpoints.split('/')[-2]
-        model_ref_name = f"{model_base_name}-{checkpoint_num}"
-    
-    video_fold  = os.path.join(args.video_main_fold, f"{model_ref_name}-{args.env_config.split('/')[-1]}") 
-    if not os.path.exists(video_fold):
-        Path(video_fold).mkdir(parents=True,exist_ok=True)
-    
+
+    video_fold = _get_video_fold(args.checkpoints, args.env_config, args.video_main_fold)
+
     model_config = dict(
         temperature=args.temperature,
         history_num = args.history_num,
@@ -194,11 +195,11 @@ def multi_evaluate(args):
             resultss.extend(results)
             print(f"part frames IDs: {results} done!")
             futures = rest_futures
-        
-        ray.shutdown()
-        
+
         # 写入日志文件
         file_utils.dump_json_file(resultss,video_log_path)
+
+    ray.shutdown()
     draw_utils.show_success_rate(resultss,os.path.join(video_fold,"image.png") )
 
 if __name__ == "__main__":
@@ -212,7 +213,7 @@ if __name__ == "__main__":
     parser.add_argument('--device',type=str,default="cuda:1")
     
     parser.add_argument('--base-url',type=str)
-    parser.add_argument('--video-main-fold',type=str)
+    parser.add_argument('--video-main-fold',type=str,default="logs/")
     
     parser.add_argument('--instruction-type',type=str,default='normal')
     parser.add_argument('--temperature','-t',type=float,default=0.7)
@@ -239,11 +240,17 @@ if __name__ == "__main__":
     
     if args.workers==0:
         environment_config["verbos"] = True
-        video_path = f"{args.checkpoints.split('/')[-1]}-{args.env_config.split('/')[-1]}.mp4"
-        evaluate(video_path=video_path,checkpoints = args.checkpoints,environment_config = environment_config,device=args.device,base_url=args.base_url,model_config=model_config)
+        video_fold = _get_video_fold(args.checkpoints, args.env_config, args.video_main_fold)
+        episode_dir = os.path.join(video_fold, "0")
+        Path(episode_dir).mkdir(parents=True, exist_ok=True)
+        video_path = os.path.join(episode_dir, "0.mp4")
+        evaluate(video_path=video_path,checkpoints=args.checkpoints,environment_config=environment_config,device=args.device,base_url=args.base_url,model_config=model_config)
     elif args.workers==1:
-        video_path = f"{args.checkpoints.split('/')[-1]}-{args.env_config.split('/')[-1]}.mp4"
-        evaluate(video_path=f"{args.checkpoints.split('/')[-1]}-{args.env_config.split('/')[-1]}.mp4",checkpoints = args.checkpoints,environment_config = environment_config,base_url=args.base_url,model_config=model_config)
+        video_fold = _get_video_fold(args.checkpoints, args.env_config, args.video_main_fold)
+        episode_dir = os.path.join(video_fold, "0")
+        Path(episode_dir).mkdir(parents=True, exist_ok=True)
+        video_path = os.path.join(episode_dir, "0.mp4")
+        evaluate(video_path=video_path,checkpoints=args.checkpoints,environment_config=environment_config,base_url=args.base_url,model_config=model_config)
     elif args.workers>1:
         multi_evaluate(args)
         

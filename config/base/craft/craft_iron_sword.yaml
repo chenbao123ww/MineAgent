@@ -27,4 +27,6 @@ init_inventory:
   - slot: 1
     type: stick
     quantity: 1
-
+  - slot: 2
+    type: oak_planks
+    quantity: 4

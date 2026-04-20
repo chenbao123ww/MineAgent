@@ -24,4 +24,6 @@ init_inventory:
   - slot: 0
     type: cobblestone
     quantity: 8
-
+  - slot: 1
+    type: oak_planks
+    quantity: 4

@@ -23,7 +23,7 @@ need_gui: True
 init_inventory:
   - slot: 0
     type: oak_planks
-    quantity: 2
+    quantity: 6
   - slot: 1
     type: stick
     quantity: 1
