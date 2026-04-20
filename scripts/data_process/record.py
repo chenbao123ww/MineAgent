@@ -29,7 +29,7 @@ import hydra
 from rich import print
 
 # ── Project root on sys.path (utils/ lives there) ────────────────────────────
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 # ── Make JarvisVLA importable ─────────────────────────────────────────────────
 sys.path.insert(0, "/root/autodl-tmp/JarvisVLA")
 
@@ -224,7 +224,8 @@ if __name__ == "__main__":
     parser.add_argument("--max-frames",         type=int,   default=1000)
     parser.add_argument("--extra-steps",        type=int,   default=20)
     parser.add_argument("--fps",                type=int,   default=20)
-    parser.add_argument("--save-frames",        action="store_true")
+    parser.add_argument("--save-frames",    dest="save_frames", action="store_true",  default=True)
+    parser.add_argument("--no-save-frames", dest="save_frames", action="store_false")
 
     parser.add_argument("--temperature",        type=float, default=0.9)
     parser.add_argument("--history-num",        type=int,   default=2)

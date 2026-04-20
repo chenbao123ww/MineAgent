@@ -22,6 +22,10 @@ mobs:
     number: 1
     range_x: [-2, 2]
     range_z: [3, 10]
+  - name: "cow"
+    number: 1
+    range_x: [2, 2]
+    range_z: [3, 10]
 
 init_inventory:
   - slot: 0

@@ -30,3 +30,6 @@ init_inventory:
   - slot: 2
     type: oak_planks
     quantity: 4
+  - slot: 3
+    type: crafting_table
+    quantity: 1

@@ -9,7 +9,7 @@ Your task: produce a single concise skill JSON that captures the **essential, ge
 - Be **brief and high-level**. Every sentence must earn its place.
 - Avoid restating what is obvious from the task name.
 - Generalise beyond this specific trajectory — the skill should apply to any similar situation, not just this exact run.
-- Use plain imperative language ("Locate the target", "Press attack repeatedly").
+- Use plain imperative language ("Stay and look around", "Locate the target", "Press attack repeatedly").
 - No bullet walls. No redundant qualifiers.
 
 ## Trajectory summary fields

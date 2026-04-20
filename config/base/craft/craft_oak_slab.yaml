@@ -24,4 +24,6 @@ init_inventory:
   - slot: 0
     type: oak_planks
     quantity: 7
-
+  - slot: 1
+    type: crafting_table
+    quantity: 1

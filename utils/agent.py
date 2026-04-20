@@ -132,8 +132,14 @@ class RecordingAgent(agent_wrapper.VLLM_AGENT):
             new_history[-1] = (image, raw_output, thought, self.history[-1][-1] + 1)
             self.history = new_history
 
+        # Strip <think>...</think> before action decoding; keep raw_output intact for history.
+        action_text = raw_output
+        think_end = raw_output.find("</think>")
+        if think_end != -1:
+            action_text = raw_output[think_end + len("</think>"):]
+
         if self.LLM_backbone in {"qwen2_vl"}:
-            token_ids = self.tokenizer(raw_output)["input_ids"]
+            token_ids = self.tokenizer(action_text)["input_ids"]
         else:
             token_ids = raw_output
         self.last_action_tokens = token_ids
@@ -190,13 +196,18 @@ class TrajectoryRecorder:
         if self._writer is None:
             self._init_writer(pov)
         self._writer.send(pov.astype(np.uint8).tobytes())
+        frame_rel = None
         if self.save_frames:
+            frame_path = self.frames_dir / f"{step:05d}.png"
             cv2.imwrite(
-                str(self.frames_dir / f"{step:05d}.png"),
+                str(frame_path),
                 cv2.cvtColor(pov.astype(np.uint8), cv2.COLOR_RGB2BGR),
             )
+            # relative to trajectories/ (parent of the run folder)
+            frame_rel = str(frame_path.relative_to(self.output_dir.parent))
         self.steps.append({
             "step":             step,
+            "frame_path":       frame_rel,
             "instruction":      instruction,
             "model_raw_output": raw_output,
             "model_from_cache": from_cache,

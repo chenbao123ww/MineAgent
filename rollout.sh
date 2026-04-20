@@ -56,7 +56,7 @@ echo "" | tee -a "$LOG"
 for task in "${tasks[@]}"; do
     echo "[$(date)] === $task ===" | tee -a "$LOG"
 
-    conda run -n minestudio python "$REPO/scripts/evaluate.py" \
+    conda run -n minestudio python "$REPO/scripts/eval/evaluate.py" \
         --workers      $workers \
         --split-number $workers \
         --env-config   "$task" \

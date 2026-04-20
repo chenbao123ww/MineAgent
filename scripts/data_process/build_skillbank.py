@@ -3,7 +3,7 @@ build_skillbank.py — Extract reusable skills from MineAgent trajectory data.
 
 Loads a trajectory JSON + video, sends both to an expert LLM, and persists
 the returned skill JSON to skillbank.json.  System prompt is read from
-prompt/prompt.md so it can be edited without touching this file.
+prompt/skillbank.md so it can be edited without touching this file.
 
 Evolution flags (all off by default to keep test runs clean):
   --evo             Update usage_count / success_count for existing skills
@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import List, Optional
 
 # utils/ lives at the project root (parent of scripts/)
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from rich import print
 
@@ -183,7 +183,7 @@ def build_summary(traj: dict) -> dict:
 # Prompt construction
 # ─────────────────────────────────────────────────────────────────────────────
 
-_PROMPT_FILE = Path(__file__).parent.parent / "prompt" / "prompt.md"
+_PROMPT_FILE = Path(__file__).parent.parent.parent / "prompt" / "skillbank.md"
 
 
 def _load_system_prompt() -> str:

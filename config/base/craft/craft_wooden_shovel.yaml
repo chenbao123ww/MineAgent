@@ -27,4 +27,6 @@ init_inventory:
   - slot: 1
     type: stick
     quantity: 2
-
+  - slot: 2
+    type: crafting_table
+    quantity: 1

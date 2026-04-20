@@ -11,7 +11,7 @@ cd "$REPO"
 
 echo "[$(date)] Starting base task runs" | tee -a "$LOG"
 
-for yaml in "$CONFIG_BASE"/base/{craft,kill,mine,smelt}/*.yaml; do
+for yaml in "$CONFIG_BASE"/base/{kill,smelt}/*.yaml; do
     fname=$(basename "$yaml" .yaml)
     [[ "$fname" == "base" ]] && continue
 
@@ -21,10 +21,12 @@ for yaml in "$CONFIG_BASE"/base/{craft,kill,mine,smelt}/*.yaml; do
     echo "" | tee -a "$LOG"
     echo "[$(date)] === $env_config ===" | tee -a "$LOG"
 
-    conda run -n minestudio python3 "$REPO/scripts/record.py" \
+    conda run -n minestudio python3 "$REPO/scripts/data_process/record.py" \
         --env-config  "$env_config" \
         --config-base "$CONFIG_BASE" \
-        --max-frames  300 \
+        --max-frames  1000 \
+        --base-url    http://localhost:8000/v1 \
+        --save-frames \
         2>&1 | tee -a "$LOG"
 done
 

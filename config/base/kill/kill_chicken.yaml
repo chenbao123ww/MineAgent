@@ -19,8 +19,12 @@ reward_conf:
 
 mobs:
   - name: "chicken"
-    number: 1
+    number: 2
     range_x: [-2, 2]
+    range_z: [3, 10]
+  - name: "chicken"
+    number: 2
+    range_x: [2, 2]
     range_z: [3, 10]
 
 init_inventory:
