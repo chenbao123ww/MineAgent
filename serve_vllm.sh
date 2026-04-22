@@ -1,8 +1,10 @@
 #!/bin/bash
+# Usage: ./serve_vllm.sh
+#        MODEL=models/jarvis_vla_skill_sft ./serve_vllm.sh   (override model)
 
 cuda_visible_devices=0
 card_num=1
-model_name_or_path="/root/autodl-tmp/MineAgent/models/jarvis_vla_qwen2_vl_7b_sft"
+model_name_or_path="${MODEL:-/root/autodl-tmp/MineAgent/models/jarvis_vla_qwen2_vl_7b_sft}"
 
 CUDA_VISIBLE_DEVICES=$cuda_visible_devices OMP_NUM_THREADS=4 \
     vllm serve $model_name_or_path \

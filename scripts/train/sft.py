@@ -13,23 +13,28 @@ The <think> and </think> tokens are already in the extended JarvisVLA vocabulary
 (special_token.json indices 12–13), so no new tokens are needed.
 
 Usage — single GPU:
-    python scripts/sft.py \\
+    python scripts/train/sft.py \\
         --data-dir   sft_data \\
         --model-path models/jarvis_vla_qwen2_vl_7b_sft \\
         --output-dir models/jarvis_vla_skill_sft
 
 Usage — multi-GPU (DDP via torchrun):
-    torchrun --nproc_per_node=2 scripts/sft.py \\
+    torchrun --nproc_per_node=2 scripts/train/sft.py \\
         --data-dir   sft_data \\
         --model-path models/jarvis_vla_qwen2_vl_7b_sft \\
         --output-dir models/jarvis_vla_skill_sft \\
-        --batch-size 2 --grad-accum 8
+        --batch-size 4 --grad-accum 4
 
 Key flags:
-    --freeze-vision    Freeze visual encoder weights (saves ~30 % memory).
-    --max-seq-length   Token budget per example (default 2048).
-    --lr               Peak learning rate (default 2e-5).
-    --epochs           Training epochs (default 3).
+    --freeze-vision     Freeze visual encoder weights (saves ~30 % memory).
+    --max-seq-length    Token budget per example (default 4096).
+    --lr                Peak learning rate (default 2e-5).
+    --epochs            Training epochs (default 3).
+    --no-wandb          Disable Weights & Biases logging.
+    --wandb-project     W&B project name (default: mineagent-sft).
+    --wandb-entity      W&B entity/team name (optional).
+    --wandb-run-name    W&B run display name (optional, auto-generated if omitted).
+    --compile           Enable torch.compile for additional throughput (experimental).
 """
 
 import argparse
@@ -72,6 +77,19 @@ def _count_total(model) -> int:
     return sum(p.numel() for p in model.parameters())
 
 
+def _setup_wandb(args, is_main: bool) -> None:
+    """Configure W&B env vars before Trainer initialises the integration."""
+    if args.no_wandb or not is_main:
+        os.environ["WANDB_DISABLED"] = "true"
+        return
+
+    os.environ["WANDB_PROJECT"] = args.wandb_project
+    if args.wandb_entity:
+        os.environ["WANDB_ENTITY"] = args.wandb_entity
+    # Silence the wandb login prompt in non-interactive environments.
+    os.environ.setdefault("WANDB_SILENT", "true")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────────────────────────
@@ -79,6 +97,8 @@ def _count_total(model) -> int:
 def main(args):
     local_rank = int(os.environ.get("LOCAL_RANK", -1))
     is_main    = local_rank in {0, -1}
+
+    _setup_wandb(args, is_main)
 
     # ── Load processor & add special tokens ──────────────────────────────────
     if is_main:
@@ -101,7 +121,7 @@ def main(args):
         print(f"[cyan]Loading model from {args.model_path}[/cyan]")
     model = Qwen2VLForConditionalGeneration.from_pretrained(
         args.model_path,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
     )
     model.config.use_cache = False
@@ -125,11 +145,16 @@ def main(args):
         print(f"  Trainable: {trainable:,} / {total:,} "
               f"({100 * trainable / total:.1f} %)")
 
+    # ── Optional: torch.compile ───────────────────────────────────────────────
+    if args.compile:
+        if is_main:
+            print("[cyan]Compiling model with torch.compile (mode=reduce-overhead) …[/cyan]")
+        model = torch.compile(model, mode="reduce-overhead")
+
     # ── Data collator ─────────────────────────────────────────────────────────
-    # Resolve image_folder: prefer meta.json from data-dir, fall back to arg
     meta_file = Path(args.data_dir) / "meta.json"
     if meta_file.exists():
-        meta        = json.loads(meta_file.read_text())
+        meta         = json.loads(meta_file.read_text())
         image_folder = Path(meta.get("trajectory_dir", args.trajectory_dir))
     else:
         image_folder = Path(args.trajectory_dir)
@@ -139,15 +164,15 @@ def main(args):
 
     collator = make_collator(
         "VLAMultimodalChatDataCollatorforVLM",
-        processor    = processor,
-        model_path   = "qwen2_vl",
-        image_folder = image_folder,
+        processor      = processor,
+        model_path     = "qwen2_vl",
+        image_folder   = image_folder,
         max_seq_length = args.max_seq_length,
     )
 
     # ── Dataset ───────────────────────────────────────────────────────────────
-    data_dir   = Path(args.data_dir)
-    raw        = load_dataset(
+    data_dir = Path(args.data_dir)
+    raw      = load_dataset(
         "json",
         data_files={
             "train": str(data_dir / "train.jsonl"),
@@ -158,8 +183,8 @@ def main(args):
         print(f"  train={len(raw['train'])}  valid={len(raw['valid'])}")
 
     # ── Training arguments ────────────────────────────────────────────────────
-    output_dir  = Path(args.output_dir)
-    has_ckpt    = bool(list(output_dir.glob("checkpoint-*")))
+    output_dir = Path(args.output_dir)
+    has_ckpt   = False  # save_strategy="no" → no checkpoints to resume from
 
     training_args = TrainingArguments(
         output_dir                    = str(output_dir),
@@ -171,37 +196,66 @@ def main(args):
         weight_decay                  = 0.01,
         warmup_ratio                  = 0.03,
         lr_scheduler_type             = "cosine",
+        # Precision
         bf16                          = True,
+        tf32                          = True,           # Blackwell TF32 matmuls
+        # Memory
         gradient_checkpointing        = True,
         gradient_checkpointing_kwargs = {"use_reentrant": False},
-        logging_steps                 = 10,
-        save_steps                    = args.save_steps,
-        eval_steps                    = args.save_steps,
+        # Optimizer — fused AdamW is measurably faster on modern CUDA
+        optim                         = "adamw_torch_fused",
+        # Data loading
+        dataloader_num_workers        = args.dataloader_workers,
+        dataloader_pin_memory         = True,
+        dataloader_prefetch_factor    = 2,
+        # Logging / saving
+        logging_steps                 = args.logging_steps,
+        eval_steps                    = args.eval_steps,
         eval_strategy                 = "steps",
-        save_strategy                 = "steps",
-        save_total_limit              = 2,
-        dataloader_num_workers        = 4,
+        save_strategy                 = "no",   # no intermediate checkpoints; final save is in trainer.save_model()
+        save_only_model               = True,   # guard: if save_strategy ever re-enabled, skip optimizer state (~56 GB)
+        # W&B
+        report_to                     = "none" if args.no_wandb else "wandb",
+        run_name                      = args.wandb_run_name,
+        # DDP
         remove_unused_columns         = False,
-        report_to                     = "none",
         ddp_find_unused_parameters    = False,
-        # Required by JarvisVLA's collator — prevents TRL from re-processing data
-        dataset_kwargs                = {"skip_prepare_dataset": True},
     )
-    # dataset_text_field is read by SFTTrainer; Trainer ignores it but we set it
-    # for forwards-compatibility if someone swaps in SFTTrainer later.
-    training_args.dataset_text_field = "text"
 
     # ── Trainer ───────────────────────────────────────────────────────────────
     trainer = Trainer(
-        model          = model,
-        args           = training_args,
-        data_collator  = collator,
-        train_dataset  = raw["train"],
-        eval_dataset   = raw["valid"],
-        tokenizer      = processor.tokenizer,
+        model         = model,
+        args          = training_args,
+        data_collator = collator,
+        train_dataset = raw["train"],
+        eval_dataset  = raw["valid"],
+        tokenizer     = processor.tokenizer,
     )
 
-    if is_main:
+    # ── Log dataset-level stats to W&B (main process only) ───────────────────
+    if is_main and not args.no_wandb:
+        try:
+            import wandb
+            think_frac = sum(
+                1 for ex in raw["train"]
+                if any(
+                    "<think>" in item.get("text", "")
+                    for turn in ex["conversations"]
+                    for item in turn["content"]
+                )
+            ) / max(1, len(raw["train"]))
+            print(f"  Think-annotated steps: {think_frac:.1%} of train set")
+            if wandb.run is not None:
+                wandb.run.summary.update({
+                    "dataset/train_size":        len(raw["train"]),
+                    "dataset/valid_size":        len(raw["valid"]),
+                    "dataset/think_frac":        think_frac,
+                    "model/trainable_params":    _count_trainable(model),
+                    "model/total_params":        _count_total(model),
+                })
+        except ImportError:
+            pass
+    elif is_main:
         think_frac = sum(
             1 for ex in raw["train"]
             if any(
@@ -252,15 +306,33 @@ if __name__ == "__main__":
                         help="Where to save the fine-tuned checkpoint")
     parser.add_argument("--freeze-vision", action="store_true",
                         help="Freeze the visual encoder (saves ~30 %% GPU memory)")
+    parser.add_argument("--compile", action="store_true",
+                        help="Enable torch.compile(mode='reduce-overhead') for extra throughput")
 
     # ── Training hyper-parameters ─────────────────────────────────────────────
-    parser.add_argument("--epochs",         type=int,   default=3)
-    parser.add_argument("--batch-size",     type=int,   default=1,
-                        help="Per-device batch size")
-    parser.add_argument("--grad-accum",     type=int,   default=16,
+    parser.add_argument("--epochs",             type=int,   default=3)
+    parser.add_argument("--batch-size",         type=int,   default=2,
+                        help="Per-device batch size (RTX PRO 6000 / 97 GB: 2 is safe; try 4 if headroom allows)")
+    parser.add_argument("--grad-accum",         type=int,   default=8,
                         help="Gradient accumulation steps (effective batch = batch_size × gpus × grad_accum)")
-    parser.add_argument("--lr",             type=float, default=2e-5)
-    parser.add_argument("--max-seq-length", type=int,   default=2048)
-    parser.add_argument("--save-steps",     type=int,   default=200)
+    parser.add_argument("--lr",                 type=float, default=2e-5)
+    parser.add_argument("--max-seq-length",     type=int,   default=4096,
+                        help="Token budget per example (increased from 2048 for 97 GB VRAM)")
+    parser.add_argument("--eval-steps",         type=int,   default=200,
+                        help="Run validation every N steps (no checkpoint is saved)")
+    parser.add_argument("--logging-steps",      type=int,   default=5,
+                        help="Log every N steps (lower = finer W&B curves)")
+    parser.add_argument("--dataloader-workers", type=int,   default=8,
+                        help="DataLoader worker processes")
+
+    # ── W&B ───────────────────────────────────────────────────────────────────
+    parser.add_argument("--no-wandb",       action="store_true",
+                        help="Disable Weights & Biases logging entirely")
+    parser.add_argument("--wandb-project",  type=str, default="mineagent-sft",
+                        help="W&B project name")
+    parser.add_argument("--wandb-entity",   type=str, default=None,
+                        help="W&B entity (team or username). Defaults to your default W&B entity.")
+    parser.add_argument("--wandb-run-name", type=str, default=None,
+                        help="W&B run display name. Auto-generated if omitted.")
 
     main(parser.parse_args())

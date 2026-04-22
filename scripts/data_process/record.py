@@ -21,6 +21,7 @@ Usage:
 """
 
 import argparse
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -139,6 +140,8 @@ def record(args):
         history_num=args.history_num,
         instruction_type=args.instruction_type,
         action_chunk_len=args.action_chunk_len,
+        skill_persist_steps=args.skill_persist_steps,
+        skillbank_path=args.skillbank or None,
     )
     instructions    = [item["text"] for item in cfg.task_conf]
     instruction_str = instructions[0]
@@ -150,7 +153,8 @@ def record(args):
     for step in range(args.max_frames):
         pov    = info["pov"].copy()
         action = agent.forward([pov], instructions,
-                               need_crafting_table=need_crafting_table)
+                               need_crafting_table=need_crafting_table,
+                               env_info=info)
         obs, reward, terminated, truncated, info = env.step(action)
         total_reward += reward
 
@@ -166,13 +170,18 @@ def record(args):
             info=info,
         )
 
+        if terminated:
+            print(f"[red]✗ Agent died at step {step} — treating as failure[/red]")
+            break
+
         if reward > 0:
             success = True
             print(f"[green]✓ Success at step {step}[/green]")
             for extra in range(1, args.extra_steps + 1):
                 pov    = info["pov"].copy()
                 action = agent.forward([pov], instructions,
-                                       need_crafting_table=need_crafting_table)
+                                       need_crafting_table=need_crafting_table,
+                                       env_info=info)
                 obs, reward, terminated, truncated, info = env.step(action)
                 total_reward += reward
                 recorder.record(
@@ -200,6 +209,11 @@ def record(args):
     recorder.save_json(meta)
     recorder.save_video(fps=args.fps)
     print(f"[bold]Done — success={success}, steps={len(recorder.steps)}, reward={total_reward}[/bold]")
+
+    if not success and not args.keep_failed:
+        shutil.rmtree(recorder.output_dir)
+        print(f"[yellow]Discarded failed trajectory: {recorder.output_dir}[/yellow]")
+
     return success
 
 
@@ -224,13 +238,21 @@ if __name__ == "__main__":
     parser.add_argument("--max-frames",         type=int,   default=1000)
     parser.add_argument("--extra-steps",        type=int,   default=20)
     parser.add_argument("--fps",                type=int,   default=20)
-    parser.add_argument("--save-frames",    dest="save_frames", action="store_true",  default=True)
-    parser.add_argument("--no-save-frames", dest="save_frames", action="store_false")
+    parser.add_argument("--save-frames",    dest="save_frames",  action="store_true",  default=True)
+    parser.add_argument("--no-save-frames", dest="save_frames",  action="store_false")
+    parser.add_argument("--keep-failed",    dest="keep_failed",  action="store_true",  default=False)
 
     parser.add_argument("--temperature",        type=float, default=0.9)
     parser.add_argument("--history-num",        type=int,   default=2)
     parser.add_argument("--action-chunk-len",   type=int,   default=1)
     parser.add_argument("--instruction-type",   type=str,   default="normal")
+    parser.add_argument("--skill-persist-steps", type=int,  default=0,
+                        help="Steps a skill CoT persists as [Active Skill] context (0=disabled; "
+                             "superseded by live RAG when --skillbank is provided)")
+    parser.add_argument("--skillbank", type=str,
+                        default="/root/autodl-tmp/MineAgent/skillbank.json",
+                        help="Path to skillbank.json for live RAG skill retrieval at inference "
+                             "(pass empty string to disable)")
 
     args = parser.parse_args()
     record(args)

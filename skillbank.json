@@ -1,18 +1,235 @@
 [
   {
-    "skill_id": "melee_combat_hostile",
-    "skill_name": "Melee Combat Against Hostiles",
-    "description": "Locate, approach, and eliminate a hostile mob using a melee weapon.",
-    "preconditions": "Equip a melee weapon. Identify a target mob in the immediate area.",
+    "skill_id": "kill_target_acquisition",
+    "skill_type": "success",
+    "skill_name": "Locate and Center Target",
+    "description": "Systematically scan the environment to find the target entity and align the crosshair for engagement.",
+    "preconditions": "The agent is in the vicinity of the target but does not have a clear line of sight or focus.",
     "sub_tasks": [
-      "Rotate the camera to center the target and move forward to close the distance.",
-      "Maintain the crosshair on the target while staying within striking range.",
-      "Press attack repeatedly until the target is defeated, adjusting for knockback."
+      "Rotate the camera horizontally to scan the immediate area",
+      "Identify the target entity among environmental clutter",
+      "Adjust pitch and yaw to center the target in the crosshair"
     ],
     "key_action_patterns": [
-      "attack (repeatedly when crosshair is on target)",
-      "forward + turn_left/right (to track and approach)",
-      "look_up/down (to adjust for target height)"
-    ]
+      "turn_left or turn_right",
+      "look_up+turn_left",
+      "look_down+turn_right"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "kill_sustained_melee_engagement",
+    "skill_type": "success",
+    "skill_name": "Maintain Proximity and Attack",
+    "description": "Close the distance to the target and deliver continuous strikes until the entity is defeated.",
+    "preconditions": "The target is identified and the agent has a melee weapon equipped.",
+    "sub_tasks": [
+      "Move forward to enter the entity's hit range",
+      "Execute rapid attack actions while tracking target movement",
+      "Adjust camera pitch to account for target height changes"
+    ],
+    "key_action_patterns": [
+      "attack",
+      "forward+attack",
+      "attack+turn_left"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "kill_loot_recovery",
+    "skill_type": "success",
+    "skill_name": "Secure Post-Kill Drops",
+    "description": "Navigate to the entity's death location to collect experience orbs and item drops.",
+    "preconditions": "The target entity has been successfully killed and items are visible on the ground.",
+    "sub_tasks": [
+      "Look down toward the ground where the entity died",
+      "Walk directly over the dropped items",
+      "Pause briefly to ensure the pickup logic registers"
+    ],
+    "key_action_patterns": [
+      "look_down",
+      "forward",
+      "no_op"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "kill_blind_striking_avoid",
+    "skill_type": "avoidance",
+    "skill_name": "Ineffective Out-of-Range Attacking",
+    "description": "Avoid spamming the attack action when the target is too far away or not centered in the crosshair.",
+    "preconditions": "The agent is in combat but the target is moving rapidly or keeping distance.",
+    "common_mistakes": [
+      "Spamming attack while the target is out of reach",
+      "Attacking the ground or air due to poor camera alignment"
+    ],
+    "corrective_actions": [
+      "Cease attacking and use forward movement to close the gap",
+      "Re-center the crosshair on the target before resuming strikes"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "kill_excessive_idling_avoid",
+    "skill_type": "avoidance",
+    "skill_name": "Static Combat Idling",
+    "description": "Avoid long periods of inactivity (no-ops) during an active engagement which allows targets to move away.",
+    "preconditions": "The agent has initiated combat but the target is still alive.",
+    "common_mistakes": [
+      "Standing still for multiple frames after a target moves",
+      "Failing to input movement or camera actions during the orient phase"
+    ],
+    "corrective_actions": [
+      "Maintain constant camera micro-adjustments to track the mob",
+      "Use short forward bursts to stay within the strike zone"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "mine_approach_and_align",
+    "skill_type": "success",
+    "skill_name": "Approach and Target Alignment",
+    "description": "Navigate to the target block and center the crosshair to ensure mining actions register correctly.",
+    "preconditions": "The target block must be visible in the immediate environment.",
+    "sub_tasks": [
+      "Move toward the block until it is within reach distance",
+      "Adjust pitch and yaw to center the crosshair on the block face",
+      "Maintain a stable position to prevent the crosshair from drifting"
+    ],
+    "key_action_patterns": [
+      "forward + look_down",
+      "look_up + turn_right"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "mine_sustained_execution",
+    "skill_type": "success",
+    "skill_name": "Sustained Mining Execution",
+    "description": "Hold the attack action continuously until the block breaks and drops as a collectible item.",
+    "preconditions": "The agent must be standing within three blocks of the target with the crosshair aligned.",
+    "sub_tasks": [
+      "Hold the attack button without interruption",
+      "Wait for the block destruction animation to complete",
+      "Confirm the block has disappeared from the world"
+    ],
+    "key_action_patterns": [
+      "attack",
+      "attack + no_op"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "mine_tool_selection",
+    "skill_type": "success",
+    "skill_name": "Tool Selection and Usage",
+    "description": "Equip the most effective tool for the specific block material to maximize mining speed.",
+    "preconditions": "Appropriate tools like pickaxes or shovels are present in the hotbar.",
+    "sub_tasks": [
+      "Identify if the block is stone, dirt, or wood-based",
+      "Select the corresponding hotbar slot for the required tool",
+      "Initiate mining with the active tool"
+    ],
+    "key_action_patterns": [
+      "hotbar.2",
+      "hotbar.1 + attack"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "mine_incomplete_collection_avoid",
+    "skill_type": "avoidance",
+    "skill_name": "Premature Target Abandonment",
+    "description": "Avoid moving away or looking at new targets before the current block is fully broken and its drops are collected.",
+    "preconditions": "The agent has started mining a block but the item has not yet entered the inventory.",
+    "common_mistakes": [
+      "Turning the camera away before the block breaks",
+      "Walking past the dropped item without picking it up"
+    ],
+    "corrective_actions": [
+      "Keep the crosshair on the block until the reward is triggered",
+      "Step directly onto the block's previous coordinates to collect drops"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "general_target_centering",
+    "skill_type": "success",
+    "skill_name": "Center Target in View",
+    "description": "Use coordinated camera movements to locate and align the crosshair with the target before engaging.",
+    "preconditions": "The target is visible or its general direction is known.",
+    "sub_tasks": [
+      "Scan the environment using horizontal turns to locate the target.",
+      "Adjust vertical pitch to account for target height or terrain elevation.",
+      "Halt rotation once the target is centered in the crosshair."
+    ],
+    "key_action_patterns": [
+      "turn_left or turn_right",
+      "look_down+turn_left or look_up+turn_right"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "general_precision_engagement",
+    "skill_type": "success",
+    "skill_name": "Execute Precision Attack",
+    "description": "Close the distance and deliver timed strikes to maximize hit probability and minimize counter-attacks.",
+    "preconditions": "The target is centered and within visual range.",
+    "sub_tasks": [
+      "Move forward to reach striking distance of the entity or block.",
+      "Trigger the attack action repeatedly while maintaining focus.",
+      "Adjust orientation during the attack to track moving targets."
+    ],
+    "key_action_patterns": [
+      "forward then attack",
+      "attack+turn_left or attack+turn_right"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "general_loot_collection",
+    "skill_type": "success",
+    "skill_name": "Collect Dropped Resources",
+    "description": "Navigate to the location of a defeated entity or broken block to secure dropped items.",
+    "preconditions": "The target has been successfully killed or mined and items have dropped.",
+    "sub_tasks": [
+      "Identify the item entity on the ground.",
+      "Move directly over the item to trigger pickup.",
+      "Briefly pause to ensure the inventory update is processed."
+    ],
+    "key_action_patterns": [
+      "forward+look_down",
+      "no_op"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "general_excessive_idling_avoid",
+    "skill_type": "avoidance",
+    "skill_name": "Avoid Excessive Idling",
+    "description": "Minimize unnecessary no-op actions and stationary periods to improve task efficiency.",
+    "preconditions": "An active task is assigned and the target is reachable.",
+    "common_mistakes": [
+      "Executing long sequences of no_op actions while the target is in view.",
+      "Standing still for multiple frames after completing an orientation turn."
+    ],
+    "corrective_actions": [
+      "Initiate forward movement immediately upon centering the target.",
+      "Combine turning actions with forward movement to maintain momentum."
+    ],
+    "usage_count": 0,
+    "success_count": 0
   }
 ]

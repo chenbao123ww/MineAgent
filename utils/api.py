@@ -87,12 +87,24 @@ class GeminiClient:
         video_path: Path,
         temperature: float = 0.2,
         max_tokens: int = 8192,
+        timeout: int = 600,
     ) -> str:
         """Convenience wrapper: read video from disk and send inline."""
-        return self.chat(
-            system=system,
-            user_text=user_text,
-            video_path=video_path,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        parts = [{"text": user_text}]
+        video_b64 = base64.b64encode(Path(video_path).read_bytes()).decode("ascii")
+        parts.append({"inline_data": {"mime_type": "video/mp4", "data": video_b64}})
+
+        payload = json.dumps({
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": parts}],
+            "generationConfig": {
+                "temperature":     temperature,
+                "maxOutputTokens": max_tokens,
+            },
+        }, ensure_ascii=False)
+
+        data = self._post(payload, timeout=timeout)
+        try:
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError) as e:
+            raise RuntimeError(f"Unexpected API response: {data}") from e

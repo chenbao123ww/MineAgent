@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-seed: 3001859308298079279
+seed: 2145917995920697484
 task_conf:
   - name: "kill_entity"
     text: "kill_entity:skeleton"

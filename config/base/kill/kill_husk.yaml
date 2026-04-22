@@ -2,7 +2,7 @@ defaults:
   - base
   - _self_
 
-seed: 3001859308298079279
+seed: 400759557860619648
 command:
   - "/time set night"
 

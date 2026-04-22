@@ -31,7 +31,9 @@ Usage:
 import argparse
 import json
 import os
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -51,6 +53,56 @@ from utils.parser import describe_env_state, build_traj_summary
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PROMPT_FILE = Path(__file__).parent.parent.parent / "prompt" / "use_skill.md"
+
+# Videos larger than this will be compressed before sending (bytes)
+_VIDEO_SIZE_LIMIT = 2 * 1024 * 1024  # 2 MB
+
+
+def _get_ffmpeg_exe() -> Optional[str]:
+    """Return path to bundled ffmpeg from imageio_ffmpeg, or None."""
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
+
+
+def _compress_video(src: Path, max_size_bytes: int = _VIDEO_SIZE_LIMIT) -> Path:
+    """
+    Re-encode src to a temp file at reduced quality/resolution.
+    Returns the temp Path (caller does NOT need to delete it; it is registered
+    with atexit). Falls back to src unchanged if ffmpeg is unavailable.
+    """
+    if src.stat().st_size <= max_size_bytes:
+        return src
+
+    ffmpeg = _get_ffmpeg_exe()
+    if ffmpeg is None:
+        print(f"  [yellow]ffmpeg not available — sending uncompressed video ({src.stat().st_size//1024} KB)[/yellow]")
+        return src
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    tmp.close()
+    dst = Path(tmp.name)
+
+    cmd = [
+        ffmpeg, "-y", "-i", str(src),
+        "-vf", "scale=480:270",
+        "-r", "10",
+        "-c:v", "libx264", "-crf", "35", "-preset", "fast",
+        "-an",               # drop audio
+        str(dst),
+    ]
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0 or not dst.exists() or dst.stat().st_size == 0:
+        print(f"  [yellow]video compression failed — sending original ({src.stat().st_size//1024} KB)[/yellow]")
+        dst.unlink(missing_ok=True)
+        return src
+
+    orig_kb = src.stat().st_size  // 1024
+    comp_kb = dst.stat().st_size  // 1024
+    print(f"  [dim]video compressed: {orig_kb} KB → {comp_kb} KB[/dim]")
+    return dst
 
 
 def _load_system_prompt() -> str:
@@ -78,8 +130,11 @@ def annotate_with_video(
     if not video_path.exists():
         raise FileNotFoundError(f"No video.mp4 in {traj_dir}")
 
+    video_path = _compress_video(video_path)
+
     init_state = describe_env_state(steps[0].get("env_state", {}))
-    skills     = retrieve_skills_rag(init_state, task, skillbank)
+    skills     = retrieve_skills_rag(init_state, task, skillbank,
+                                     max_success=2, max_avoidance=2)
     if not skills:
         raise ValueError(f"No skills matched for task '{task}'")
 
@@ -189,11 +244,16 @@ def process_trajectory(
             "skills": [
                 {
                     "skill_id":            s["skill_id"],
+                    "skill_type":          s.get("skill_type", "success"),
                     "skill_name":          s["skill_name"],
-                    "description":         s.get("description",         ""),
-                    "preconditions":       s.get("preconditions",        ""),
-                    "sub_tasks":           s.get("sub_tasks",            []),
-                    "key_action_patterns": s.get("key_action_patterns",  []),
+                    "description":         s.get("description",          ""),
+                    "preconditions":       s.get("preconditions",         ""),
+                    # success skill fields
+                    "sub_tasks":           s.get("sub_tasks",             []),
+                    "key_action_patterns": s.get("key_action_patterns",   []),
+                    # avoidance skill fields
+                    "common_mistakes":     s.get("common_mistakes",       []),
+                    "corrective_actions":  s.get("corrective_actions",    []),
                 }
                 for s in skills_in_meta
             ],

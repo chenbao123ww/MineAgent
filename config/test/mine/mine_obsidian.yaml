@@ -1,13 +1,17 @@
-seed: 2895519726874751769
+seed: 3780425614792207635
 random_tp_range: 1000
 
 fast_reset: True
 start_time: 0
-time_limit: 2500
+time_limit: 3000
 candidate_preferred_spawn_biome:
   - plains
 candidate_weather:
   - clear
+
+# Place a 3-wide 3-tall obsidian wall 4 blocks in front of the player
+command:
+  - "/fill ~-1 ~ ~4 ~1 ~2 ~4 obsidian"
 
 camera_config:
   camera_binsize: 1
@@ -19,35 +23,30 @@ origin_resolution: [640, 360]
 resize_resolution: [640, 360]
 
 need_crafting_table: False
-need_gui: True
+need_gui: False
 inventory_distraction_level: "low"
 
 task_conf:
-  - name: "smelt"
-    text: "craft_item:iron_ingot (smelt 3)"
+  - name: "mine"
+    text: "mine_block:obsidian"
 
 reward_conf:
-  - event: "craft_item"
-    max_reward_times: 3
+  - event: "mine_block"
+    max_reward_times: 1
     reward: 1.0
     objects:
-      - "iron_ingot"
-    identity: "smelt 3 iron_ingot"
+      - "obsidian"
+    identity: "mine obsidian"
 
 init_inventory:
   - slot: 0
-    type: furnace
+    type: diamond_pickaxe
     quantity: 1
-  - slot: 20
-    type: charcoal
-    quantity: 16
-  - slot: 14
-    type: iron_ore
-    quantity: 8
-
-need_furnace: True
+  - slot: 9
+    type: iron_pickaxe
+    quantity: 1
 
 mobs: []
 
 worker:
-  "smelt"
+  "mine"

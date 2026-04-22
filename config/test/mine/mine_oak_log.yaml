@@ -1,11 +1,11 @@
-seed: 3864806031105573936
+seed: 5063814729305861
 random_tp_range: 1000
 
 fast_reset: True
 start_time: 0
-time_limit: 3000
+time_limit: 1000
 candidate_preferred_spawn_biome:
-  - mountains
+  - forest
 candidate_weather:
   - clear
 
@@ -20,32 +20,21 @@ resize_resolution: [640, 360]
 
 need_crafting_table: False
 need_gui: False
-inventory_distraction_level: "low"
+inventory_distraction_level: "zero"
 
 task_conf:
   - name: "mine"
-    text: "mine_block:deepslate_diamond_ore"
+    text: "mine_block:oak_log"
 
 reward_conf:
   - event: "mine_block"
     max_reward_times: 1
     reward: 1.0
     objects:
-      - "deepslate_diamond_ore"
-      - "diamond_ore"
-    identity: "mine diamond ore"
+      - "oak_log"
+    identity: "mine oak_log"
 
-# Agent must dig down to y=-58 or find a cave; iron pickaxe required (stone won't work)
-init_inventory:
-  - slot: 0
-    type: "iron_pickaxe"
-    quantity: 1
-  - slot: 1
-    type: "torch"
-    quantity: 32
-  - slot: 9
-    type: "cobblestone"
-    quantity: 16
+init_inventory: []
 
 mobs: []
 

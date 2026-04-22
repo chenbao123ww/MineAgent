@@ -1,7 +1,7 @@
 #!/bin/bash
 # run_base_tasks.sh — record one trajectory per base task
 
-set -euo pipefail
+set -uo pipefail
 
 REPO=/root/autodl-tmp/MineAgent
 CONFIG_BASE=$REPO/config
@@ -11,7 +11,10 @@ cd "$REPO"
 
 echo "[$(date)] Starting base task runs" | tee -a "$LOG"
 
-for yaml in "$CONFIG_BASE"/base/{kill,smelt}/*.yaml; do
+success_count=0
+fail_count=0
+
+for yaml in "$CONFIG_BASE"/base/{craft,kill,mine,smelt}/*.yaml; do
     fname=$(basename "$yaml" .yaml)
     [[ "$fname" == "base" ]] && continue
 
@@ -21,14 +24,19 @@ for yaml in "$CONFIG_BASE"/base/{kill,smelt}/*.yaml; do
     echo "" | tee -a "$LOG"
     echo "[$(date)] === $env_config ===" | tee -a "$LOG"
 
-    conda run -n minestudio python3 "$REPO/scripts/data_process/record.py" \
+    if conda run -n minestudio python3 "$REPO/scripts/data_process/record.py" \
         --env-config  "$env_config" \
         --config-base "$CONFIG_BASE" \
         --max-frames  1000 \
         --base-url    http://localhost:8000/v1 \
         --save-frames \
-        2>&1 | tee -a "$LOG"
+        2>&1 | tee -a "$LOG"; then
+        ((success_count++)) || true
+    else
+        ((fail_count++)) || true
+        echo "[$(date)] WARN: $env_config exited non-zero" | tee -a "$LOG"
+    fi
 done
 
 echo "" | tee -a "$LOG"
-echo "[$(date)] All base tasks finished." | tee -a "$LOG"
+echo "[$(date)] All base tasks finished. success=$success_count fail=$fail_count" | tee -a "$LOG"

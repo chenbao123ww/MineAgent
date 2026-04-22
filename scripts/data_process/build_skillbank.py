@@ -1,33 +1,23 @@
 """
 build_skillbank.py — Extract reusable skills from MineAgent trajectory data.
 
-Loads a trajectory JSON + video, sends both to an expert LLM, and persists
-the returned skill JSON to skillbank.json.  System prompt is read from
-prompt/skillbank.md so it can be edited without touching this file.
-
-Evolution flags (all off by default to keep test runs clean):
-  --evo             Update usage_count / success_count for existing skills
-                    that are relevant to the current trajectory's task type.
-                    Applied to ALL complete trajectories, including failed ones.
-  --prune           After processing, remove skills whose success rate is
-                    below --min-success-rate (requires usage_count >= --prune-threshold).
-  --no-novelty-check
-                    Skip the novelty gate; add the skill even if it is
-                    very similar to an existing one.
+Groups trajectories by task category (kill / mine / craft / smelt), aggregates
+statistics across all trajectories in each group, then calls the LLM once per
+category to produce 3–5 representative skills.  Also produces a 'general'
+category synthesised from all trajectories combined.
 
 Usage:
-    python scripts/build_skillbank.py \\
-        --trajectory trajectories/kill_zombie-20260419_215315 \\
+    python scripts/data_process/build_skillbank.py \\
+        --trajectory-dir trajectories \\
         --api-key sk-xxx
 
-    # Evolution mode: track stats, novelty-filter new skills, prune weak ones
-    python scripts/build_skillbank.py \\
-        --trajectory-dir trajectories \\
-        --api-key sk-xxx \\
-        --evo --prune
+    # Single trajectory (still runs in category mode for that one traj)
+    python scripts/data_process/build_skillbank.py \\
+        --trajectory trajectories/kill_zombie-... \\
+        --api-key sk-xxx
 
-    # Batch, skip novelty gate
-    python scripts/build_skillbank.py \\
+    # Skip novelty gate
+    python scripts/data_process/build_skillbank.py \\
         --trajectory-dir trajectories \\
         --api-key sk-xxx \\
         --no-novelty-check
@@ -39,21 +29,20 @@ import os
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
-# utils/ lives at the project root (parent of scripts/)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from rich import print
 
 from utils.api       import GeminiClient
 from utils.parser    import (_summarise_action, _action_phase,
-                              _non_empty, _first_nonempty_env, _inventory_snapshot)
-from utils.skillbank import update_usage, prune_skills, is_novel
+                              _non_empty, _inventory_snapshot)
+from utils.skillbank import is_novel
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Skill bank I/O helpers
+# Skill bank I/O
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _load_bank(path: Path) -> list:
@@ -67,7 +56,25 @@ def _save_bank(bank: list, path: Path) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Trajectory summarisation
+# Category detection
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PREFIX_TO_CATEGORY: Dict[str, str] = {
+    "kill_entity": "kill",
+    "mine_block":  "mine",
+    "craft_item":  "craft",
+    "smelt_item":  "smelt",
+}
+
+
+def detect_category(traj: dict) -> str:
+    instruction = traj["trajectory"][0]["instruction"]
+    prefix = instruction.split(":")[0] if ":" in instruction else instruction
+    return _PREFIX_TO_CATEGORY.get(prefix, "general")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-trajectory summary (unchanged stats extraction)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_summary(traj: dict) -> dict:
@@ -75,7 +82,7 @@ def build_summary(traj: dict) -> dict:
     steps = traj["trajectory"]
     n     = len(steps)
 
-    phase_counts: Counter       = Counter()
+    phase_counts: Counter        = Counter()
     action_combo_counts: Counter = Counter()
     cam_pitch_deltas, cam_yaw_deltas = [], []
 
@@ -91,17 +98,11 @@ def build_summary(traj: dict) -> dict:
                   for combo, cnt in action_combo_counts.most_common(10)]
     phase_dist = {phase: {"count": cnt, "pct": round(cnt / n * 100, 1)}
                   for phase, cnt in phase_counts.most_common()}
-    cam_summary = {
-        "mean_pitch_delta": round(sum(cam_pitch_deltas) / n, 3),
-        "mean_yaw_delta":   round(sum(cam_yaw_deltas) / n, 3),
-        "max_pitch_delta":  round(max(cam_pitch_deltas), 3),
-        "max_yaw_delta":    round(max(cam_yaw_deltas), 3),
-    }
 
     state_transitions = []
     prev_kill = prev_mine = prev_pickup = {}
     for s in steps:
-        es = s["env_state"]
+        es     = s["env_state"]
         kill   = es.get("kill_entity", {})
         mine   = es.get("mine_block",  {})
         pickup = es.get("pickup",      {})
@@ -128,10 +129,11 @@ def build_summary(traj: dict) -> dict:
         "success_step":       reward_steps[0] if reward_steps else None,
     }
 
-    sample_indices = set(range(0, n, max(1, n // 15)))
-    sample_indices.update(reward_steps[:3])
+    sample_indices = set(range(0, n, max(1, n // 10)))
+    sample_indices.update(reward_steps[:2])
     if first_attack is not None:
         sample_indices.add(first_attack)
+
     sampled_steps = []
     for s in steps:
         if s["step"] not in sample_indices:
@@ -140,193 +142,242 @@ def build_summary(traj: dict) -> dict:
         sampled_steps.append({
             "step":           s["step"],
             "action_summary": _summarise_action(s["action"]),
-            "camera_delta":   s["action"].get("camera", [0.0, 0.0]),
             "reward":         s["reward"],
             "kill_entity":    _non_empty(es.get("kill_entity", {})),
             "mine_block":     _non_empty(es.get("mine_block",  {})),
-            "damage_dealt":   _non_empty(es.get("damage_dealt",{})),
-            "use_item":       _non_empty(es.get("use_item",    {})),
-            "location": {k: round(v, 2)
-                         for k, v in es.get("location_stats", {}).items()
-                         if k in ("xpos","ypos","zpos","yaw","pitch","light_level")},
         })
 
-    start_inv   = _inventory_snapshot(steps[0]["env_state"]["inventory"])
-    end_inv     = _inventory_snapshot(steps[-1]["env_state"]["inventory"])
-    final_es    = steps[-1]["env_state"]
+    start_inv = _inventory_snapshot(steps[0]["env_state"]["inventory"])
+    end_inv   = _inventory_snapshot(steps[-1]["env_state"]["inventory"])
+    final_es  = steps[-1]["env_state"]
 
     return {
         "meta":               meta,
         "task_instruction":   steps[0]["instruction"],
         "total_steps":        n,
         "success":            meta["success"],
-        "total_reward":       meta["total_reward"],
         "phase_distribution": phase_dist,
         "top_action_combos":  top_combos,
-        "camera_summary":     cam_summary,
         "milestones":         milestones,
-        "state_transitions":  state_transitions,
+        "state_transitions":  state_transitions[:12],
         "sampled_steps":      sampled_steps,
         "start_inventory":    start_inv,
         "end_inventory":      end_inv,
-        "start_equipped":     steps[0]["env_state"].get("equipped_items", {}),
-        "end_equipped":       steps[-1]["env_state"].get("equipped_items", {}),
         "cumulative_kill_entity":  _non_empty(final_es.get("kill_entity",  {})),
         "cumulative_mine_block":   _non_empty(final_es.get("mine_block",   {})),
-        "cumulative_use_item":     _non_empty(final_es.get("use_item",     {})),
         "cumulative_pickup":       _non_empty(final_es.get("pickup",       {})),
-        "cumulative_damage_dealt": _non_empty(final_es.get("damage_dealt", {})),
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Prompt construction
+# Category-level aggregate summary
 # ─────────────────────────────────────────────────────────────────────────────
 
-_PROMPT_FILE = Path(__file__).parent.parent.parent / "prompt" / "skillbank.md"
+# Type alias: (traj_dir, summary_dict, success_bool)
+TrajTriple = Tuple[Path, dict, bool]
 
 
-def _load_system_prompt() -> str:
-    if _PROMPT_FILE.exists():
-        return _PROMPT_FILE.read_text(encoding="utf-8").strip()
-    raise FileNotFoundError(f"System prompt not found: {_PROMPT_FILE}")
+def build_category_summary(category: str, triples: List[TrajTriple]) -> dict:
+    """Aggregate multiple trajectory summaries into one category-level summary."""
+    summaries = [s for _, s, _ in triples]
 
+    # Unique targets
+    targets = sorted({
+        s["task_instruction"].split(":")[-1] if ":" in s["task_instruction"]
+        else s["task_instruction"]
+        for s in summaries
+    })
 
-def build_user_prompt(summary: dict) -> str:
-    return (
-        "Below is the structured trajectory summary. "
-        "Analyse it carefully and produce the skill JSON.\n\n"
-        "```json\n"
-        + json.dumps(summary, indent=2, ensure_ascii=False)
-        + "\n```\n\n"
-        "Return only the skill JSON object, no other text."
-    )
+    success_count = sum(1 for _, _, ok in triples if ok)
+
+    # Aggregate action combos
+    combo_agg: Counter = Counter()
+    for s in summaries:
+        for c in s["top_action_combos"]:
+            combo_agg[c["actions"]] += c["count"]
+
+    # Aggregate phase distribution
+    phase_agg: Counter = Counter()
+    for s in summaries:
+        for phase, stats in s["phase_distribution"].items():
+            phase_agg[phase] += stats["count"]
+    total_steps = sum(phase_agg.values()) or 1
+    phase_dist = {
+        p: {"count": n, "pct": round(n / total_steps * 100, 1)}
+        for p, n in phase_agg.most_common()
+    }
+
+    # Select representative sample trajectories (prefer successful, keep ≤4)
+    successful = [(d, s) for d, s, ok in triples if ok]
+    failed     = [(d, s) for d, s, ok in triples if not ok]
+    selected   = (successful + failed)[:4]
+
+    return {
+        "category":           category,
+        "task_targets":       targets,
+        "total_trajectories": len(triples),
+        "success_rate":       round(success_count / len(triples), 2),
+        "phase_distribution": phase_dist,
+        "top_action_combos":  [{"actions": a, "count": c}
+                                for a, c in combo_agg.most_common(8)],
+        "sample_trajectories": [s for _, s in selected],
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LLM call
 # ─────────────────────────────────────────────────────────────────────────────
 
-def call_expert_llm(summary: dict, client: GeminiClient,
-                    video_path: Optional[Path] = None) -> dict:
+_PROMPT_FILE = Path(__file__).parent.parent.parent / "prompt" / "skillbank.md"
+
+
+def _load_system_prompt() -> str:
+    return _PROMPT_FILE.read_text(encoding="utf-8").strip()
+
+
+def call_expert_llm(category_summary: dict, client: GeminiClient) -> List[dict]:
+    """Call LLM with category-level summary. Returns list of 3–5 skill dicts."""
     system   = _load_system_prompt()
-    user_msg = build_user_prompt(summary)
+    user_msg = (
+        "Below is the category-level trajectory summary. "
+        "Analyse it and produce exactly 3–5 skill JSON records.\n\n"
+        "```json\n"
+        + json.dumps(category_summary, indent=2, ensure_ascii=False)
+        + "\n```\n\n"
+        "Return only the JSON array, no other text."
+    )
     raw = client.chat(system=system, user_text=user_msg,
-                      video_path=video_path, temperature=0.2, max_tokens=2048)
+                      temperature=0.2, max_tokens=2048)
     raw = raw.strip()
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1]
         if raw.endswith("```"):
             raw = raw.rsplit("```", 1)[0]
-    return json.loads(raw)
+    parsed = json.loads(raw)
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    return parsed
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Main processing
+# Category processing
 # ─────────────────────────────────────────────────────────────────────────────
 
-def process_trajectory(
-    traj_dir: Path,
+def _add_skills_to_bank(
+    skills: List[dict],
+    skillbank_path: Path,
+    novelty_threshold: float,
+    no_novelty_check: bool,
+) -> int:
+    """Persist a list of skill dicts to the bank. Returns count added."""
+    added = 0
+    for skill in skills:
+        skill.setdefault("skill_type", "success")
+        skill["usage_count"]   = 0
+        skill["success_count"] = 0
+
+        bank = _load_bank(skillbank_path)
+
+        if not no_novelty_check:
+            novel, max_sim = is_novel(skill, bank, max_similarity=novelty_threshold)
+            if not novel:
+                print(f"  [yellow]skip '{skill.get('skill_id')}': "
+                      f"similarity {max_sim:.2f} ≥ {novelty_threshold}[/yellow]")
+                continue
+
+        if any(s["skill_id"] == skill.get("skill_id") for s in bank):
+            print(f"  [yellow]skip '{skill.get('skill_id')}': id already in bank[/yellow]")
+            continue
+
+        bank.append(skill)
+        _save_bank(bank, skillbank_path)
+        added += 1
+        print(f"  [green]+'{skill.get('skill_id')}' [{skill.get('skill_type')}] "
+              f"→ {skillbank_path.name} ({len(bank)} total)[/green]")
+
+    return added
+
+
+def process_all_categories(
+    traj_dirs: List[Path],
     client: GeminiClient,
     skillbank_path: Path,
-    evo: bool               = False,
-    prune: bool             = False,
-    prune_threshold: int    = 5,
-    min_success_rate: float = 0.3,
     novelty_threshold: float = 0.65,
-    no_novelty_check: bool  = False,
-) -> Optional[dict]:
+    no_novelty_check: bool   = False,
+) -> int:
     """
-    Process one trajectory directory.
+    Main entry point for category-based skill extraction.
 
-    Steps (in order):
-      1. Load trajectory.  If missing → skip.
-      2. If --evo: update usage/success counts for relevant existing skills and save.
-      3. Skip skill extraction for failed trajectories.
-      4. Extract skill via LLM.
-      5. Novelty gate: skip if too similar to an existing skill (unless --no-novelty-check).
-      6. Append skill to bank (initialising usage_count / success_count = 0) and save.
-      7. If --prune: prune under-performing skills and save.
-
-    Returns the newly added skill dict, or None if nothing was added.
+    1. Load and classify all trajectories by category.
+    2. For each category: build aggregate summary → LLM → 3-5 skills.
+    3. For 'general': aggregate across all trajectories → LLM → 3-5 skills.
+    Returns total skills added.
     """
-    traj_file = traj_dir / "trajectory.json"
-    if not traj_file.exists():
-        print(f"[yellow]skip {traj_dir.name}: no trajectory.json[/yellow]")
-        return None
+    category_triples: Dict[str, List[TrajTriple]] = {}
+    all_triples: List[TrajTriple] = []
 
-    traj    = json.loads(traj_file.read_text(encoding="utf-8"))
-    success = traj["meta"].get("success", False)
-    task    = traj["trajectory"][0]["instruction"]
+    for traj_dir in traj_dirs:
+        if not traj_dir.is_dir():
+            continue
+        traj_file = traj_dir / "trajectory.json"
+        if not traj_file.exists():
+            print(f"[yellow]skip {traj_dir.name}: no trajectory.json[/yellow]")
+            continue
+        try:
+            traj    = json.loads(traj_file.read_text(encoding="utf-8"))
+            summary = build_summary(traj)
+            success = traj["meta"].get("success", False)
+            cat     = detect_category(traj)
+        except Exception as e:
+            print(f"[red]skip {traj_dir.name}: {e}[/red]")
+            continue
 
-    bank = _load_bank(skillbank_path)
+        category_triples.setdefault(cat, []).append((traj_dir, summary, success))
+        all_triples.append((traj_dir, summary, success))
 
-    # ── Step 2: usage tracking (all complete trajectories) ───────────────────
-    if evo:
-        n_updated = update_usage(bank, task, success)
-        _save_bank(bank, skillbank_path)
-        print(f"  [dim][evo] updated usage for {n_updated} skill(s) "
-              f"(task={task}, success={success})[/dim]")
+    print(f"\nFound {len(all_triples)} valid trajectories across "
+          f"{len(category_triples)} categories: {list(category_triples.keys())}")
 
-    # ── Step 3: only extract skills from successful trajectories ────────────
-    if not success:
-        print(f"[yellow]skip {traj_dir.name}: unsuccessful trajectory "
-              f"(usage stats still updated if --evo)[/yellow]")
-        return None
+    total_added = 0
 
-    print(f"[cyan]Processing {traj_dir.name} …[/cyan]")
-    summary    = build_summary(traj)
-    video_path = traj_dir / "video.mp4"
+    # ── Per-category skills ───────────────────────────────────────────────────
+    for cat, triples in sorted(category_triples.items()):
+        n_ok = sum(1 for _, _, ok in triples if ok)
+        print(f"\n[bold cyan]── Category: {cat.upper()} "
+              f"({len(triples)} traj, {n_ok} success) ──[/bold cyan]")
 
-    # ── Step 4: LLM extraction ───────────────────────────────────────────────
-    skill = call_expert_llm(summary, client, video_path=video_path)
+        cat_summary = build_category_summary(cat, triples)
+        try:
+            skills = call_expert_llm(cat_summary, client)
+        except Exception as e:
+            print(f"[red]  LLM failed for '{cat}': {e}[/red]")
+            continue
 
-    canonical = ["skill_id", "skill_name", "description",
-                 "preconditions", "sub_tasks", "key_action_patterns"]
-    skill = {k: skill[k] for k in canonical if k in skill}
+        print(f"  LLM returned {len(skills)} skill(s)")
+        n = _add_skills_to_bank(skills, skillbank_path,
+                                 novelty_threshold, no_novelty_check)
+        total_added += n
+        print(f"  → {n} added for category '{cat}'")
 
-    # Initialise tracking counters for the new skill
-    skill["usage_count"]   = 0
-    skill["success_count"] = 0
+    # ── General cross-task skills ─────────────────────────────────────────────
+    if len(category_triples) > 1:
+        print(f"\n[bold cyan]── Category: GENERAL (all {len(all_triples)} traj) ──[/bold cyan]")
+        gen_summary = build_category_summary("general", all_triples)
+        gen_summary["note"] = ("Cross-task skills applicable regardless of task type: "
+                               "navigation, combat readiness, resource efficiency.")
+        try:
+            skills = call_expert_llm(gen_summary, client)
+        except Exception as e:
+            print(f"[red]  LLM failed for 'general': {e}[/red]")
+            skills = []
 
-    # ── Step 5: novelty gate ─────────────────────────────────────────────────
-    if not no_novelty_check:
-        novel, max_sim = is_novel(skill, bank, max_similarity=novelty_threshold)
-        if not novel:
-            print(f"[yellow]  skill '{skill.get('skill_id')}' rejected: "
-                  f"max similarity {max_sim:.2f} ≥ threshold {novelty_threshold} "
-                  f"(use --no-novelty-check to force)[/yellow]")
-            # Still fall through to pruning if requested
-            skill = None
-        else:
-            print(f"  [dim]novelty OK (max_sim={max_sim:.2f})[/dim]")
+        print(f"  LLM returned {len(skills)} skill(s)")
+        n = _add_skills_to_bank(skills, skillbank_path,
+                                 novelty_threshold, no_novelty_check)
+        total_added += n
+        print(f"  → {n} added for category 'general'")
 
-    # ── Step 6: append to bank ───────────────────────────────────────────────
-    if skill is not None:
-        existing_ids = {s.get("skill_id") for s in bank}
-        if skill.get("skill_id") in existing_ids:
-            print(f"[yellow]  skill_id '{skill['skill_id']}' already in bank, skipping[/yellow]")
-            skill = None
-        else:
-            bank.append(skill)
-            _save_bank(bank, skillbank_path)
-            print(f"[green]  skill '{skill.get('skill_id')}' appended "
-                  f"→ {skillbank_path} ({len(bank)} total)[/green]")
-
-    # ── Step 7: pruning ──────────────────────────────────────────────────────
-    if prune:
-        bank = _load_bank(skillbank_path)   # reload in case step 6 wrote
-        pruned, removed_ids = prune_skills(bank, min_usage=prune_threshold,
-                                            min_success_rate=min_success_rate)
-        if removed_ids:
-            _save_bank(pruned, skillbank_path)
-            print(f"[magenta]  [prune] removed {len(removed_ids)} skill(s): "
-                  f"{removed_ids}[/magenta]")
-        else:
-            print(f"  [dim][prune] no skills pruned "
-                  f"(threshold={prune_threshold}, min_rate={min_success_rate})[/dim]")
-
-    return skill
+    return total_added
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -349,80 +400,34 @@ def main(args):
         print("[red]Provide --trajectory or --trajectory-dir[/red]")
         sys.exit(1)
 
-    added = 0
-    for d in traj_dirs:
-        if not d.is_dir():
-            continue
-        try:
-            skill = process_trajectory(
-                d, client, skillbank_path,
-                evo              = args.evo,
-                prune            = args.prune,
-                prune_threshold  = args.prune_threshold,
-                min_success_rate = args.min_success_rate,
-                novelty_threshold = args.novelty_threshold,
-                no_novelty_check  = args.no_novelty_check,
-            )
-            if skill:
-                added += 1
-        except Exception as e:
-            print(f"[red]Error on {d.name}: {e}[/red]")
+    added = process_all_categories(
+        traj_dirs,
+        client,
+        skillbank_path,
+        novelty_threshold = args.novelty_threshold,
+        no_novelty_check  = args.no_novelty_check,
+    )
 
-    print(f"\n[bold]Done — {added} new skill(s) added to {skillbank_path}[/bold]")
+    bank = _load_bank(skillbank_path)
+    print(f"\n[bold green]Done — {added} new skill(s) added. "
+          f"Bank total: {len(bank)} skill(s).[/bold green]")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MineAgent skill bank builder")
 
-    # ── Source ────────────────────────────────────────────────────────────────
     src = parser.add_mutually_exclusive_group()
     src.add_argument("--trajectory",     "-t", type=str,
                      help="Path to a single trajectory directory")
     src.add_argument("--trajectory-dir", "-T", type=str,
                      help="Directory containing multiple trajectory subdirectories")
 
-    # ── API ───────────────────────────────────────────────────────────────────
     parser.add_argument("--host",    type=str, default="poloai.top")
     parser.add_argument("--model",   type=str, default="gemini-3-flash-preview")
     parser.add_argument("--api-key", type=str, default=None)
     parser.add_argument("--output",  type=str,
                         default="/root/autodl-tmp/MineAgent/skillbank.json")
-
-    # ── Evolution / tracking ──────────────────────────────────────────────────
-    parser.add_argument(
-        "--evo", action="store_true",
-        help="Update usage_count / success_count for existing skills that match "
-             "the trajectory task type.  Applied to ALL complete trajectories "
-             "(including failed ones).  Off by default to keep test runs clean.",
-    )
-
-    # ── Novelty filtering ─────────────────────────────────────────────────────
-    parser.add_argument(
-        "--novelty-threshold", type=float, default=0.65, metavar="SIM",
-        help="Maximum weighted-Jaccard similarity allowed for a new skill "
-             "to be added (default: 0.65).  A new skill scoring ≥ this "
-             "against any existing skill is rejected as non-novel.",
-    )
-    parser.add_argument(
-        "--no-novelty-check", action="store_true",
-        help="Disable the novelty gate; add the skill regardless of similarity.",
-    )
-
-    # ── Pruning ───────────────────────────────────────────────────────────────
-    parser.add_argument(
-        "--prune", action="store_true",
-        help="After processing, remove skills whose success rate is below "
-             "--min-success-rate (only when usage_count >= --prune-threshold).",
-    )
-    parser.add_argument(
-        "--prune-threshold", type=int, default=5, metavar="N",
-        help="Minimum usage_count before a skill is eligible for pruning "
-             "(default: 5).",
-    )
-    parser.add_argument(
-        "--min-success-rate", type=float, default=0.3, metavar="RATE",
-        help="Skills with success_rate < RATE are pruned when they have "
-             "enough usage data (default: 0.3).",
-    )
+    parser.add_argument("--novelty-threshold", type=float, default=0.65)
+    parser.add_argument("--no-novelty-check",  action="store_true")
 
     main(parser.parse_args())

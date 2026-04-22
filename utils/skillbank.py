@@ -5,6 +5,11 @@ Three capabilities:
   1. Novelty check  — reject new skills too similar to existing ones (weighted Jaccard).
   2. Usage tracking — record usage_count / success_count per skill across trajectories.
   3. Pruning        — remove skills with persistently low success rates.
+
+Two skill types are supported:
+  "success"   — positive skills describing what to do.
+  "avoidance" — negative skills describing mistakes to avoid.
+Skills of different types are never compared for novelty.
 """
 
 import re
@@ -26,39 +31,58 @@ def _field_tokens(skill: dict, field: str) -> set:
 
 # ── Similarity ────────────────────────────────────────────────────────────────
 
-# Weights reflect the importance of each field for distinguishing skills.
-_SIM_FIELDS = [
+_SIM_FIELDS_SUCCESS = [
     ("skill_name",           1.0),
     ("description",          3.0),
     ("preconditions",        3.0),
     ("sub_tasks",            2.0),
     ("key_action_patterns",  2.0),
 ]
-_SIM_TOTAL_WEIGHT = sum(w for _, w in _SIM_FIELDS)
+
+_SIM_FIELDS_AVOIDANCE = [
+    ("skill_name",           1.0),
+    ("description",          3.0),
+    ("preconditions",        3.0),
+    ("common_mistakes",      2.0),
+    ("corrective_actions",   2.0),
+]
+
+
+def _sim_fields_for(skill: dict) -> List[Tuple[str, float]]:
+    if skill.get("skill_type") == "avoidance":
+        return _SIM_FIELDS_AVOIDANCE
+    return _SIM_FIELDS_SUCCESS
 
 
 def skill_similarity(s1: dict, s2: dict) -> float:
     """
     Weighted Jaccard similarity between two skill records across key text fields.
     Returns a value in [0, 1]; 1 means all fields are identical.
+    Skills of different types always return 0.0 (not comparable).
     Both-empty fields contribute full weight (treated as identical).
     One-empty fields contribute nothing.
     """
-    score = 0.0
-    for field, weight in _SIM_FIELDS:
+    if s1.get("skill_type", "success") != s2.get("skill_type", "success"):
+        return 0.0
+    fields       = _sim_fields_for(s1)
+    total_weight = sum(w for _, w in fields)
+    score        = 0.0
+    for field, weight in fields:
         t1 = _field_tokens(s1, field)
         t2 = _field_tokens(s2, field)
         if not t1 and not t2:
             score += weight
         elif t1 and t2:
             score += weight * len(t1 & t2) / len(t1 | t2)
-    return score / _SIM_TOTAL_WEIGHT
+    return score / total_weight
 
 
 def is_novel(new_skill: dict, bank: List[dict],
              max_similarity: float = 0.65) -> Tuple[bool, float]:
     """
     Check whether new_skill is sufficiently different from every skill in bank.
+
+    Only compares against skills of the same type.
 
     Returns (novel: bool, max_sim: float).
       novel=True  → the skill should be added.
