@@ -231,5 +231,77 @@
     ],
     "usage_count": 0,
     "success_count": 0
+  },
+  {
+    "skill_id": "craft_target_alignment",
+    "skill_type": "success",
+    "skill_name": "Align with Utility Block",
+    "description": "Position the camera and crosshair precisely on a crafting table or furnace to prepare for interaction.",
+    "preconditions": "The required utility block must be placed in the world and within the agent's reach.",
+    "sub_tasks": [
+      "Rotate the agent toward the utility block",
+      "Adjust pitch to look down at the block surface",
+      "Maintain a close but non-colliding distance"
+    ],
+    "key_action_patterns": [
+      "look_down + turn_left",
+      "look_up + turn_right"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "craft_menu_interaction",
+    "skill_type": "success",
+    "skill_name": "Execute Recipe Interface",
+    "description": "Open the crafting or smelting menu to convert raw materials into the target item.",
+    "preconditions": "The agent must have all necessary ingredients in the inventory and be facing the interaction target.",
+    "sub_tasks": [
+      "Trigger the use action to open the interface",
+      "Select the desired recipe from the menu",
+      "Confirm the production and move the item to inventory"
+    ],
+    "key_action_patterns": [
+      "use",
+      "no_op"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "craft_smelting_wait_state",
+    "skill_type": "success",
+    "skill_name": "Monitor Smelting Progress",
+    "description": "Wait for the furnace to process raw materials into cooked or refined goods.",
+    "preconditions": "Fuel and raw materials must be correctly placed inside an active furnace.",
+    "sub_tasks": [
+      "Remain stationary near the furnace",
+      "Periodically check the furnace interface for completion",
+      "Extract the finished product once the progress bar finishes"
+    ],
+    "key_action_patterns": [
+      "no_op",
+      "sneak"
+    ],
+    "usage_count": 0,
+    "success_count": 0
+  },
+  {
+    "skill_id": "craft_redundant_attack_avoid",
+    "skill_type": "avoidance",
+    "skill_name": "Avoid Interaction Noise",
+    "description": "Refrain from using the attack action while attempting to craft or smelt items.",
+    "preconditions": "The agent is standing in front of a utility block or navigating an inventory menu.",
+    "common_mistakes": [
+      "Spamming the attack button instead of the use button",
+      "Accidentally breaking the crafting table or furnace",
+      "Interrupting the smelting process with unnecessary strikes"
+    ],
+    "corrective_actions": [
+      "Use the 'use' action exclusively for block interaction",
+      "Wait for the UI to load before inputting further actions"
+    ],
+    "usage_count": 0,
+    "success_count": 0
   }
 ]

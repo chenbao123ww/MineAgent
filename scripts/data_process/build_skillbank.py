@@ -38,7 +38,7 @@ from rich import print
 from utils.api       import GeminiClient
 from utils.parser    import (_summarise_action, _action_phase,
                               _non_empty, _inventory_snapshot)
-from utils.skillbank import is_novel
+from utils.skillbank import is_novel, update_usage, prune_skills
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -409,6 +409,36 @@ def main(args):
     )
 
     bank = _load_bank(skillbank_path)
+
+    # ── Evo: update usage/success counts per trajectory ───────────────────────
+    if args.evo:
+        print("\n[bold cyan]── Evo: updating usage counts ──[/bold cyan]")
+        evo_updated = 0
+        for traj_dir in traj_dirs:
+            traj_file = traj_dir / "trajectory.json"
+            if not traj_file.exists():
+                continue
+            try:
+                traj        = json.loads(traj_file.read_text(encoding="utf-8"))
+                instruction = traj["trajectory"][0]["instruction"]
+                success     = traj["meta"].get("success", False)
+                n           = update_usage(bank, instruction, success)
+                evo_updated += n
+            except Exception as e:
+                print(f"[yellow]  evo skip {traj_dir.name}: {e}[/yellow]")
+        _save_bank(bank, skillbank_path)
+        print(f"  Updated {evo_updated} usage record(s) across {len(bank)} skills.")
+
+    # ── Prune: remove low-success-rate skills ─────────────────────────────────
+    if args.prune:
+        kept, removed = prune_skills(bank)
+        if removed:
+            _save_bank(kept, skillbank_path)
+            bank = kept
+            print(f"\n[yellow]Pruned {len(removed)} skill(s): {removed}[/yellow]")
+        else:
+            print("\n[green]Prune: no skills removed.[/green]")
+
     print(f"\n[bold green]Done — {added} new skill(s) added. "
           f"Bank total: {len(bank)} skill(s).[/bold green]")
 
@@ -429,5 +459,9 @@ if __name__ == "__main__":
                         default="/root/autodl-tmp/MineAgent/skillbank.json")
     parser.add_argument("--novelty-threshold", type=float, default=0.65)
     parser.add_argument("--no-novelty-check",  action="store_true")
+    parser.add_argument("--evo",               action="store_true",
+                        help="Update usage_count/success_count per skill after extraction")
+    parser.add_argument("--prune",             action="store_true",
+                        help="Remove skills below success-rate threshold after evo update")
 
     main(parser.parse_args())

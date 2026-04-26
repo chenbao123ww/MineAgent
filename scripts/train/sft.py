@@ -122,7 +122,7 @@ def main(args):
     model = Qwen2VLForConditionalGeneration.from_pretrained(
         args.model_path,
         dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
+        attn_implementation="sdpa",
     )
     model.config.use_cache = False
 

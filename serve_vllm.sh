@@ -1,6 +1,6 @@
 #!/bin/bash
 # Usage: ./serve_vllm.sh
-#        MODEL=models/jarvis_vla_skill_sft ./serve_vllm.sh   (override model)
+# MODEL=models/jarvis_vla_skill_sft ./serve_vllm.sh   (override model)
 
 cuda_visible_devices=0
 card_num=1
